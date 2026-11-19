@@ -1,1 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Ledger</title>
+<style>
+:root{--bg:#000;--sf:#0e1116;--ln:#1f242d;--tx:#e9ecf2;--mu:#838a99;--ac:#5b9cf6;--ac2:#3a7bd5;--neg:#ee6b73;--pos:#4cc38a}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+body{padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+button,input,select{font:inherit;color:inherit}
+small,.mu{color:var(--mu)}
+#app{max-width:640px;margin:0 auto;padding:0 16px 96px}
+header{display:flex;gap:8px;align-items:center;padding:14px 0}
+select,input{width:100%;background:var(--sf);border:1px solid var(--ln);border-radius:8px;padding:10px 12px;outline:none}
+select:focus,input:focus,button:focus-visible{border-color:var(--ac);outline:2px solid var(--ac2);outline-offset:1px}
+header select{font-size:17px;font-weight:600;border:0;background:none;padding-left:0}
+.ic{background:none;border:1px solid var(--ln);border-radius:8px;width:42px;height:42px;font-size:18px;cursor:pointer}
+.accs{display:flex;gap:10px;overflow-x:auto;padding:4px 0 14px}
+.acc{flex:0 0 auto;min-width:140px;padding:10px 14px;border-left:3px solid var(--ln);cursor:pointer}
+.acc.on{border-color:var(--ac)}
+.acc b{display:block;font-size:20px;font-variant-numeric:tabular-nums;margin-top:2px}
+.row{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--ln);cursor:pointer}
+.row b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.neg{color:var(--neg)}.pos{color:var(--pos)}
+.fab{position:fixed;right:max(16px,calc(50% - 304px));bottom:calc(20px + env(safe-area-inset-bottom));width:58px;height:58px;border-radius:50%;border:0;background:var(--ac);color:#000;font-size:30px;cursor:pointer}
+#sheet{position:fixed;inset:0;background:#000b;display:none;align-items:flex-end;justify-content:center;z-index:5}
+#sheet.open{display:flex}
+.panel{background:var(--sf);width:100%;max-width:640px;max-height:92%;overflow:auto;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
+.panel h3{margin:0 0 6px}.panel h4{margin:18px 0 4px;font-size:14px;color:var(--mu);font-weight:600}
+label{display:block;margin:12px 0 4px;font-size:13px;color:var(--mu)}
+.pri{width:100%;margin-top:18px;padding:12px;border:0;border-radius:8px;background:var(--ac);color:#000;font-weight:700;cursor:pointer}
+.ghost{width:100%;margin-top:8px;padding:10px;border:1px solid var(--ln);border-radius:8px;background:none;cursor:pointer}
+.seg{display:flex;gap:6px}.seg button{flex:1;padding:9px;border:1px solid var(--ln);border-radius:8px;background:none;cursor:pointer}
+.seg .on{border-color:var(--ac);color:var(--ac)}
+.li{padding:6px 0;border-top:1px solid var(--ln);display:flex;justify-content:space-between}
+#toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--neg);color:#000;padding:10px 14px;border-radius:8px;display:none;z-index:9;max-width:90%}
+.login{text-align:center;padding-top:30vh}.login .pri{max-width:280px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="app"></div><div id="sheet"></div><div id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const SB=supabase.createClient('https://edgjmnkxbqguxtzpibga.supabase.co','sb_publishable_9IjP39MOBXw-Mw--M_XQjg_xs3fHopK');
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let S={pid:localStorage.getItem('pid'),acct:'all',prof:[],cur:[],acc:[],cat:[],bal:{},tx:[]};
+const cur=id=>S.cur.find(c=>c.id==id)||{decimals:2,symbol:'',code:''};
+const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
+function fmt(n,cid){const c=cur(cid),d=c.decimals;const s=(Math.abs(n)/10**d).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});return(n<0?'-':'')+(c.symbol||'')+s+(c.symbol?'':' '+c.code)}
+function parse(str,d){str=String(str).trim().replace(/,/g,'');if(!str||str==='.'||!/^\d*\.?\d*$/.test(str))return null;const[i,f='']=str.split('.');if(f.length>d)return null;return Number(i||0)*10**d+Number((f+'0'.repeat(d)).slice(0,d)||0)}
+function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>t.style.display='none',3500)}
+function sheet(h){$('#sheet').innerHTML=`<div class="panel">${h}</div>`;$('#sheet').classList.add('open')}
+function closeSheet(){$('#sheet').classList.remove('open')}
+$('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeSheet()});
 
+function renderLogin(){$('#app').innerHTML=`<div class="login"><h1>Ledger</h1><p class="mu">Sign in to open your profiles.</p><button class="pri" data-a="login">Continue with Google</button></div>`}
+
+async function load(){
+  const q=(t,f)=>{const r=SB.from(t).select('*').is('deleted_at',null);return f?f(r):r};
+  const R=await Promise.all([q('profiles',r=>r.order('sort_order').order('created_at')),q('currencies'),q('accounts',r=>r.order('sort_order').order('created_at')),q('categories',r=>r.order('name')),SB.from('account_balances').select('*')]);
+  const bad=R.find(x=>x.error);if(bad)return toast(bad.error.message);
+  [S.prof,S.cur,S.acc,S.cat]=R.slice(0,4).map(x=>x.data);
+  S.bal=Object.fromEntries(R[4].data.map(x=>[x.account_id,x.balance]));
+  if(!S.prof.find(p=>p.id==S.pid)){S.pid=S.prof[0]?.id;S.acct='all'}
+  localStorage.setItem('pid',S.pid||'');
+  const ids=S.acc.filter(a=>a.profile_id==S.pid).map(a=>a.id);
+  S.tx=ids.length?((await SB.from('transactions').select('*').in('account_id',ids).is('deleted_at',null).order('date',{ascending:false}).order('created_at',{ascending:false}).limit(300)).data||[]):[];
+  render();
+}
+
+function render(){
+  const accs=S.acc.filter(a=>a.profile_id==S.pid&&!a.archived);
+  const cn=id=>S.cat.find(c=>c.id==id)?.name||'Uncategorized',an=id=>S.acc.find(a=>a.id==id)?.name||'?';
+  const rows=S.tx.filter(t=>S.acct=='all'||t.account_id==S.acct).map(t=>{
+    const tr=t.type.startsWith('transfer'),neg=t.type=='expense'||t.type=='transfer_out',a=S.acc.find(x=>x.id==t.account_id);
+    const title=tr?(neg?'Transfer out':'Transfer in'):(t.payee||cn(t.category_id));
+    const sub=[t.date,an(t.account_id),tr?'':cn(t.category_id)].filter(Boolean).join('  ');
+    return`<div class="row" data-tx="${t.id}"><div><div>${esc(title)}</div><small>${esc(sub)}</small></div><b class="${neg?'neg':'pos'}">${fmt(neg?-t.amount:t.amount,a?.currency_id)}</b></div>`}).join('');
+  $('#app').innerHTML=`<header><select id="psel" aria-label="Profile">${S.prof.map(p=>`<option value="${p.id}" ${p.id==S.pid?'selected':''}>${esc(p.icon)} ${esc(p.name)}</option>`).join('')}</select><button class="ic" data-a="settings" aria-label="Settings">⚙</button></header>
+  <div class="accs">${accs.map(a=>`<div class="acc ${S.acct==a.id?'on':''}" data-acc="${a.id}"><small>${esc(a.name)}</small><b>${fmt(S.bal[a.id]||0,a.currency_id)}</b></div>`).join('')||'<p class="mu">No accounts in this profile yet. Open settings to add one.</p>'}</div>
+  ${rows||'<p class="mu">No transactions yet. Tap + to add one.</p>'}
+  <button class="fab" data-a="add" aria-label="Add transaction">+</button>`;
+}
+
+function form(title,fields,go){
+  sheet(`<h3>${title}</h3>`+fields.map(f=>`<label>${f.l}</label>`+(f.o?`<select id="f_${f.k}">${f.o.map(o=>`<option value="${esc(o[0])}">${esc(o[1])}</option>`).join('')}</select>`:`<input id="f_${f.k}" value="${esc(f.v??'')}" placeholder="${esc(f.p??'')}">`)).join('')+`<button class="pri" id="go">Save</button>`);
+  $('#go').onclick=async()=>{const v={};fields.forEach(f=>v[f.k]=$('#f_'+f.k).value.trim());const e=await go(v);if(e)return toast(e);closeSheet();load()};
+}
+
+function openSettings(){
+  const accs=S.acc.filter(a=>a.profile_id==S.pid);
+  sheet(`<h3>Settings</h3><h4>Profiles</h4>${S.prof.map(p=>`<div class="li"><span>${esc(p.icon)} ${esc(p.name)}</span></div>`).join('')}<button class="ghost" data-a="newprof">New profile</button>
+  <h4>Accounts in this profile</h4>${accs.map(a=>`<div class="li"><span>${esc(a.name)}</span><small>${esc(cur(a.currency_id).code)}</small></div>`).join('')}<button class="ghost" data-a="newacc">New account</button>
+  <h4>Currencies</h4>${S.cur.map(c=>`<div class="li"><span>${esc(c.code)} ${esc(c.name)}</span><small>${c.decimals} decimals</small></div>`).join('')}<button class="ghost" data-a="newcur">New currency</button>
+  <button class="ghost" data-a="out" style="margin-top:24px">Sign out</button>`);
+}
+
+function openAdd(){
+  const accs=S.acc.filter(a=>a.profile_id==S.pid&&!a.archived);
+  if(!accs.length){toast('Create an account first');return openSettings()}
+  let type='expense';const first=S.acct!='all'?S.acct:accs[0].id;
+  const opts=sel=>accs.map(a=>`<option value="${a.id}" ${a.id==sel?'selected':''}>${esc(a.name)} (${esc(cur(a.currency_id).code)})</option>`).join('');
+  sheet(`<h3>New transaction</h3><div class="seg" id="ty"><button class="on" data-t="expense">Expense</button><button data-t="income">Income</button><button data-t="transfer">Transfer</button></div>
+  <label>Account</label><select id="a1">${opts(first)}</select>
+  <div id="tow" hidden><label>To account</label><select id="a2">${opts(accs.find(a=>a.id!=first)?.id)}</select></div>
+  <label>Amount</label><input id="am" inputmode="decimal" placeholder="0">
+  <div id="am2w" hidden><label>Amount received</label><input id="am2" inputmode="decimal"></div>
+  <div id="cw"><label>Category</label><select id="ct"></select></div>
+  <label id="pl">Payee</label><input id="pn"><label>Date</label><input id="dt" type="date" value="${today()}">
+  <button class="pri" id="save">Save</button>`);
+  const fillCats=keep=>{const l=S.cat.filter(c=>c.profile_id==S.pid&&c.type==type);$('#ct').innerHTML='<option value="">Uncategorized</option>'+l.map(c=>`<option value="${c.id}" ${c.id==keep?'selected':''}>${esc(c.name)}</option>`).join('')+'<option value="__new">+ New category</option>'};
+  const sync=()=>{const tr=type=='transfer';$('#tow').hidden=!tr;$('#cw').hidden=tr;$('#pl').textContent=tr?'Note':'Payee';
+    const A=S.acc.find(a=>a.id==$('#a1').value),B=S.acc.find(a=>a.id==$('#a2').value);$('#am2w').hidden=!(tr&&A&&B&&A.currency_id!=B.currency_id);
+    const d=A?cur(A.currency_id).decimals:2;$('#am').placeholder=d?'0.'+'0'.repeat(d):'0'};
+  $('#ty').onclick=e=>{const b=e.target.closest('[data-t]');if(!b)return;type=b.dataset.t;[...$('#ty').children].forEach(x=>x.classList.toggle('on',x==b));if(type!='transfer')fillCats();sync()};
+  $('#a1').onchange=$('#a2').onchange=sync;
+  $('#ct').onchange=async e=>{if(e.target.value!='__new')return;const n=prompt('Category name');if(!n?.trim())return fillCats();
+    const{data,error}=await SB.from('categories').insert({profile_id:S.pid,name:n.trim(),type}).select().single();if(error)return toast(error.message);S.cat.push(data);fillCats(data.id)};
+  fillCats();sync();
+  $('#save').onclick=async()=>{
+    const A=S.acc.find(a=>a.id==$('#a1').value),amt=parse($('#am').value,cur(A.currency_id).decimals),date=$('#dt').value;
+    if(!amt)return toast('Enter a valid amount (max '+cur(A.currency_id).decimals+' decimals)');
+    let r;
+    if(type=='transfer'){const B=S.acc.find(a=>a.id==$('#a2').value);if(!B||B.id==A.id)return toast('Pick two different accounts');
+      const inn=A.currency_id==B.currency_id?amt:parse($('#am2').value,cur(B.currency_id).decimals);if(!inn)return toast('Enter the received amount');
+      r=await SB.rpc('create_transfer',{p_from_account:A.id,p_to_account:B.id,p_date:date,p_amount_out:amt,p_amount_in:inn,p_notes:$('#pn').value||null})}
+    else r=await SB.from('transactions').insert({account_id:A.id,date,type,amount:amt,category_id:$('#ct').value||null,payee:$('#pn').value||null});
+    if(r.error)return toast(r.error.message);closeSheet();load();
+  };
+}
+
+document.addEventListener('click',async e=>{
+  const t=e.target.closest('[data-a],[data-acc],[data-tx]');if(!t)return;
+  if(t.dataset.acc){S.acct=S.acct==t.dataset.acc?'all':t.dataset.acc;return render()}
+  if(t.dataset.tx){const x=S.tx.find(v=>v.id==t.dataset.tx);if(!x||!confirm('Delete this transaction?'))return;
+    const r=x.transfer_group_id?await SB.rpc('delete_transfer',{p_group:x.transfer_group_id}):await SB.from('transactions').update({deleted_at:new Date().toISOString()}).eq('id',x.id);
+    return r.error?toast(r.error.message):load()}
+  const a=t.dataset.a;
+  if(a=='login')return SB.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.href.split('#')[0]}});
+  if(a=='out'){await SB.auth.signOut();closeSheet();return renderLogin()}
+  if(a=='add')return openAdd();
+  if(a=='settings')return openSettings();
+  if(a=='newprof')return form('New profile',[{k:'name',l:'Name'},{k:'icon',l:'Icon (emoji)',v:'💼'}],async v=>{
+    if(!v.name)return'Name is required';const{data,error}=await SB.from('profiles').insert({name:v.name,icon:v.icon||'💼',sort_order:S.prof.length}).select().single();
+    if(error)return error.message;S.pid=data.id;S.acct='all'});
+  if(a=='newcur')return form('New currency',[{k:'code',l:'Code (e.g. GOLD)'},{k:'name',l:'Name'},{k:'sym',l:'Symbol (optional)'},{k:'dec',l:'Decimals (0 for whole units)',v:'0'},{k:'kind',l:'Type',o:[['custom','In-game / custom'],['fiat','Real money']]}],async v=>{
+    const d=+v.dec;if(!/^[A-Za-z0-9_]{1,12}$/.test(v.code))return'Code: letters or numbers, up to 12';if(!Number.isInteger(d)||d<0||d>8)return'Decimals must be 0 to 8';
+    const{error}=await SB.from('currencies').insert({code:v.code.toUpperCase(),name:v.name||v.code,symbol:v.sym,decimals:d,kind:v.kind});if(error)return error.message});
+  if(a=='newacc')return form('New account',[{k:'name',l:'Name'},{k:'cur',l:'Currency',o:S.cur.map(c=>[c.id,c.code+' '+c.name])},{k:'ob',l:'Opening balance (optional)'}],async v=>{
+    if(!v.name)return'Name is required';const c=cur(v.cur),neg=v.ob.startsWith('-'),ob=v.ob?parse(v.ob.replace('-',''),c.decimals):0;if(ob===null)return'Invalid opening balance';
+    const{error}=await SB.from('accounts').insert({profile_id:S.pid,currency_id:v.cur,name:v.name,opening_balance:neg?-ob:ob});if(error)return error.message});
+});
+document.addEventListener('change',e=>{if(e.target.id=='psel'){S.pid=e.target.value;S.acct='all';load()}});
+
+(async()=>{
+  const{data:{session}}=await SB.auth.getSession();
+  if(!session)return renderLogin();
+  await SB.rpc('bootstrap_user');await load();
+})();
+SB.auth.onAuthStateChange(ev=>{if(ev=='SIGNED_OUT')renderLogin()});
+</script>
+</body>
+</html>
