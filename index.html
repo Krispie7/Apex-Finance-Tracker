@@ -58,7 +58,7 @@ function sheet(h){$('#sheet').innerHTML=`<div class="panel">${h}</div>`;$('#shee
 function closeSheet(){$('#sheet').classList.remove('open')}
 $('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeSheet()});
 
-function renderLogin(){$('#app').innerHTML=`<div class="login"><h1>Ledger</h1><p class="mu">Sign in to open your profiles.</p><button class="pri" data-a="login">Continue with Google</button></div>`}
+function renderLogin(){const p=new URLSearchParams(location.search+'&'+location.hash.slice(1)),er=p.get('error_description')||p.get('error');$('#app').innerHTML=`<div class="login"><h1>Ledger</h1><p class="mu">Sign in to open your profiles.</p>${er?`<p class="neg">${esc(er)}</p>`:''}<button class="pri" data-a="login">Continue with Google</button></div>`}
 
 async function load(){
   const q=(t,f)=>{const r=SB.from(t).select('*').is('deleted_at',null);return f?f(r):r};
@@ -157,12 +157,13 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('change',e=>{if(e.target.id=='psel'){S.pid=e.target.value;S.acct='all';load()}});
 
-(async()=>{
+async function start(){
   const{data:{session}}=await SB.auth.getSession();
   if(!session)return renderLogin();
   await SB.rpc('bootstrap_user');await load();
-})();
-SB.auth.onAuthStateChange(ev=>{if(ev=='SIGNED_OUT')renderLogin()});
+}
+start();
+SB.auth.onAuthStateChange(ev=>{if(ev=='SIGNED_OUT')renderLogin();if(ev=='SIGNED_IN'&&!S.prof.length)setTimeout(start,0)});
 </script>
 </body>
 </html>
